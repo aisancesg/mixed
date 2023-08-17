@@ -1,0 +1,52 @@
+create table #agreements
+(
+	  agr_id int
+	, product char(5)
+);
+
+insert into #agreements
+values (1, 'A'), (2, 'A'), (3, 'B'), (4, 'B'), (5, 'C');
+
+create table #metrics
+(
+	  agr_id int
+	, metric_id int
+	, metric_val float
+	, start_dt date
+	, end_dt date
+);
+
+insert into #metrics
+values  (1, 1, 10.0, '2020-01-01', '2020-01-31'), (1, 1, 20.0, '2020-02-01', '2020-02-29'), (1, 2, 5.0, '2020-01-01', '2020-02-29'),
+		(2, 1, 100.0, '2020-01-01', '2020-01-31'), (2, 1, 200.0, '2020-02-01', '2020-02-29'), (2, 2, 10.0, '2020-01-01', '2020-02-29'),
+	    (3, 1, 100.0, '2020-01-01', '2020-02-29'),			-- Ставка отсутствует
+		(4, 1, 50.0, '2020-01-01', '2020-01-31'), (4, 1, 100.0, '2020-02-01', '2020-02-29'), (4, 2, 7.0, '2020-01-01', '2020-02-29'),
+		(5, 1, 100.0, '2020-02-01', '2020-02-29'), (5, 2, 7.0, '2020-01-01', '2020-02-29');		-- Объём за январь отсутствует
+
+select * from #agreements;
+
+select * from #metrics; 
+
+with subquery as (
+  select 
+    '2020-01-15' as report_date,
+    a.product,
+    m.metric_id,
+    m.metric_val,
+    --Сумма срочной задолженности по каждому продукту
+    sum(case when m.metric_id = 1 then m.metric_val else 0 end) over (partition by a.product) as sum_1,
+    --Добавим столбец с весами
+    lag(m.metric_val, 1) over (partition by a.product, a.agr_id order by m.metric_id) as metric_val_1 
+  from #metrics as m left join #agreements as a on m.agr_id = a.agr_id
+  where m.start_dt <= '2020-01-15' and m.end_dt >= '2020-01-15'
+)
+select 
+  distinct 
+  report_date,
+  product, 
+  sum_1,
+  --если на дату отчета сумма срочной задолженности по продукту нулевая, 
+  --то есть объём отсутствует,
+  --то считаю, что ставка, средневзвешенная по сумме срочной задолженности, не определена
+  round(sum(metric_val * metric_val_1) over (partition by product) / sum_1, 2) as weighted_avg_2
+from subquery;
